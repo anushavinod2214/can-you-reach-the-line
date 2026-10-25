@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CAN YOU REACH THE LINE?</title>
+  <!-- p5.js Library CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background-color: #000000;
+      color: #ffffff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #1f293d;
+    }
+    canvas {
+      display: block;
+      outline: none;
+    }
+    .touch-controls {
+      display: none;
+      margin-top: 15px;
+      gap: 10px;
+    }
+    @media (max-width: 650px) {
+      .touch-controls {
+        display: flex;
+      }
+    }
+    .btn {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #334155;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .btn:active {
+      background: #334155;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="game-container"></div>
+
+  <div class="touch-controls">
+    <button class="btn" id="btn-left" ontouchstart="touchLeft=true" ontouchend="touchLeft=false" onmousedown="touchLeft=true" onmouseup="touchLeft=false">← Left</button>
+    <button class="btn" id="btn-jump" ontouchstart="triggerJump()" onmousedown="triggerJump()">↑ Jump</button>
+    <button class="btn" id="btn-right" ontouchstart="touchRight=true" ontouchend="touchRight=false" onmousedown="touchRight=true" onmouseup="touchRight=false">Right →</button>
+  </div>
+
+  <script>
+    let ball; 
+    let bricks = [];
+    let coins = [];
+    let bombs = [];
+    let gravity = 0.6;
+    let jumpCount = 0;
+    let spawnRate = 90;
+    let coinSpawnRate = 150;
+    let bombSpawnRate = 500;
+    let score = 0;
+    let highScore = 0;
+    let gameOver = false;
+    let gameWon = false;
+    let gameStarted = false;
+    let paused = false;
+    let startTime = 0;
+    let bestTime = null;
+    let currentTime = 0;
+
+    let touchLeft = false;
+    let touchRight = false;
+
+    function setup() {
+      let canvas = createCanvas(600, 400);
+      canvas.parent('game-container');
+      
+      try {
+        highScore = localStorage.getItem('reach_line_highScore') ? parseInt(localStorage.getItem('reach_line_highScore')) : 0;
+        let savedBest = localStorage.getItem('reach_line_bestTime');
+        bestTime = savedBest !== null ? parseInt(savedBest) : null;
+      } catch (e) {
+        highScore = 0;
+        bestTime = null;
+      }
+
+      resetGame();
+    }
+
+    function resetGame() {
+      ball = { 
+        x: width / 2, 
+        y: height - 15, 
+        size: 24, 
+        velocityY: 0, 
+        speed: 5 
+      };
+      bricks = [];
+      coins = [];
+      bombs = [];
+      score = 0;
+      gameOver = false;
+      gameWon = false;
+      gameStarted = false;
+      paused = false;
+      jumpCount = 0;
+      startTime = millis();
+      currentTime = 0;
+    }
+
+    function draw() {
+      background(0);
+
+      // --- START SCREEN ---
+      if (!gameStarted) {
+        drawStartScreen();
+        return;
+      }
+
+      // --- PAUSE SCREEN ---
+      if (paused) {
+        drawPauseScreen();
+        return;
+      }
+
+      // Draw Top Win Line (Green)
+      stroke(0, 255, 0);
+      strokeWeight(4);
+      line(0, 10, width, 10);
+
+      drawPauseButton();
+
+      // --- GAME OVER SCREEN ---
+      if (gameOver) {
+        drawGameOverScreen();
+        return;
+      }
+
+      // --- WIN SCREEN ---
+      if (gameWon) {
+        drawWinScreen();
+        return;
+      }
+
+      // --- HORIZONTAL MOVEMENT ---
+      let moveX = 0;
+      if (keyIsDown(LEFT_ARROW) || keyIsDown(65) || touchLeft) moveX -= ball.speed;
+      if (keyIsDown(RIGHT_ARROW) || keyIsDown(68) || touchRight) moveX += ball.speed;
+      ball.x += moveX;
+      ball.x = constrain(ball.x, ball.size / 2, width - ball.size / 2);
+
+      // --- VERTICAL PHYSICS & GRAVITY ---
+      ball.velocityY += gravity;
+      ball.y += ball.velocityY;
+
+      // Ground collision (only floor check when falling downwards)
+      let floorY = height - ball.size / 2;
+      if (ball.velocityY >= 0 && ball.y >= floorY) {
+        ball.y = floorY;
+        ball.velocityY = 0;
+        jumpCount = 0; // Reset double jump capacity on landing
+      }
+
+      // Check Win Condition (reaching green line at top)
+      if (ball.y - ball.size / 2 <= 10) {
+        gameWon = true;
+      }
+
+      // --- SPAWN OBJECTS ---
+      if (frameCount % spawnRate === 0) {
+        bricks.push({
+          x: random(0, width - 100),
+          y: -24,
+          width: 100,
+          height: 24,
+          speed: 2,
+          isStacked: false
+        });
+      }
+
+      if (frameCount % coinSpawnRate === 0) {
+        coins.push({ 
+          x: random(30, width - 30), 
+          y: random(60, height - 60), 
+          size: 16, 
+          spawnTime: millis() 
+        });
+      }
+
+      if (frameCount % bombSpawnRate === 0) {
+        bombs.push({ 
+          x: random(30, width - 30), 
+          y: random(60, height - 60), 
+          size: 20 
+        });
+      }
+
+      // --- BRICKS LOGIC & SOLID COLLISION ---
+      for (let i = bricks.length - 1; i >= 0; i--) {
+        let brick = bricks[i];
+
+        if (!brick.isStacked) {
+          brick.y += brick.speed;
+
+          // Brick landing on ground
+          if (brick.y + brick.height >= height) {
+            brick.y = height - brick.height;
+            brick.isStacked = true;
+          }
+
+          // Brick stacking on top of other bricks
+          for (let j = 0; j < bricks.length; j++) {
+            let other = bricks[j];
+            if (
+              other.isStacked &&
+              brick !== other &&
+              brick.y + brick.height >= other.y &&
+              brick.x < other.x + other.width &&
+              brick.x + brick.width > other.x
+            ) {
+              brick.y = other.y - brick.height;
+              brick.isStacked = true;
+              break;
+            }
+          }
+        }
+
+        // Render Brick matching exact styling
+        fill(185, 95, 90);
+        noStroke();
+        rect(brick.x, brick.y, brick.width, brick.height);
+
+        // Solid Box-to-Circle Collision Check
+        let ballLeft = ball.x - ball.size / 2;
+        let ballRight = ball.x + ball.size / 2;
+        let ballTop = ball.y - ball.size / 2;
+        let ballBottom = ball.y + ball.size / 2;
+
+        if (
+          ballRight > brick.x &&
+          ballLeft < brick.x + brick.width &&
+          ballBottom > brick.y &&
+          ballTop < brick.y + brick.height
+        ) {
+          // Landing on top of brick (falling downwards)
+          if (ball.velocityY >= 0 && ballTop <= brick.y + 10) {
+            ball.y = brick.y - ball.size / 2;
+            ball.velocityY = 0;
+            jumpCount = 0; // Reset jumps when standing on brick
+          }
+          // Hitting bottom of brick (jumping upwards)
+          else if (ball.velocityY < 0 && ballBottom >= brick.y + brick.height - 10) {
+            ball.y = brick.y + brick.height + ball.size / 2;
+            ball.velocityY = 0.5; // Stop upward movement
+          }
+          // Hitting sides of brick
+          else {
+            if (moveX > 0) {
+              ball.x = brick.x - ball.size / 2;
+            } else if (moveX < 0) {
+              ball.x = brick.x + brick.width + ball.size / 2;
+            }
+          }
+        }
+      }
+
+      // --- RENDER BALL ---
+      fill(95, 110, 240);
+      noStroke();
+      ellipse(ball.x, ball.y, ball.size);
+
+      // --- COINS LOGIC ---
+      for (let i = coins.length - 1; i >= 0; i--) {
+        let coin = coins[i];
+        let coinAge = millis() - coin.spawnTime;
+
+        fill(255, 223, 0);
+        noStroke();
+
+        if (coinAge < 6000) {
+          if (coinAge > 4000 && frameCount % 30 < 15) continue;
+          ellipse(coin.x, coin.y, coin.size);
+        } else {
+          coins.splice(i, 1);
+          continue;
+        }
+
+        if (dist(ball.x, ball.y, coin.x, coin.y) < (ball.size + coin.size) / 2) {
+          score += 10;
+          coins.splice(i, 1);
+        }
+      }
+
+      // --- BOMBS LOGIC ---
+      for (let i = bombs.length - 1; i >= 0; i--) {
+        let bomb = bombs[i];
+        fill(255, 0, 0);
+        noStroke();
+        ellipse(bomb.x, bomb.y, bomb.size);
+
+        if (dist(ball.x, ball.y, bomb.x, bomb.y) < (ball.size + bomb.size) / 2) {
+          gameOver = true;
+          try {
+            if (score > highScore) {
+              highScore = score;
+              localStorage.setItem('reach_line_highScore', highScore);
+            }
+          } catch(e) {}
+        }
+      }
+
+      // Update timer
+      if (!gameWon && gameStarted && !paused) {
+        currentTime = millis() - startTime;
+      }
+
+      // Render HUD matching exact screenshot font & positions
+      drawHUD();
+    }
+
+    // --- JUMP & KEY INPUT HANDLING ---
+    function triggerJump() {
+      if (!gameStarted) {
+        gameStarted = true;
+        startTime = millis();
+        return;
+      }
+
+      if (!paused && !gameOver && !gameWon && jumpCount < 2) {
+        ball.y -= 4; // Shift position slightly to avoid sticky floor triggers
+        ball.velocityY = -11; // Upward jump impulse
+        jumpCount++;
+      }
+    }
+
+    function keyPressed(e) {
+      if ([37, 38, 39, 40, 32].includes(keyCode)) {
+        if (e && e.preventDefault) e.preventDefault();
+      }
+
+      // Jump (UP arrow or Spacebar or 'W')
+      if (keyCode === UP_ARROW || keyCode === 32 || keyCode === 87) {
+        triggerJump();
+      } 
+      // Toggle Pause ('P')
+      else if ((keyCode === 80 || key === 'p' || key === 'P') && gameStarted && !gameOver && !gameWon) {
+        paused = !paused;
+      } 
+      else if (key === 'R' || key === 'r') {
+        resetGame();
+      }
+    }
+
+    function mousePressed() {
+      if (!gameStarted) {
+        gameStarted = true;
+        startTime = millis();
+      } else {
+        if (mouseX > width - 60 && mouseX < width - 15 && mouseY > 20 && mouseY < 65) {
+          if (!gameOver && !gameWon) {
+            paused = !paused;
+          }
+        }
+      }
+    }
+
+    // --- UI DRAWING HELPER FUNCTIONS ---
+    function drawStartScreen() {
+      background(0);
+
+      noStroke();
+      fill(255);
+      textAlign(CENTER, CENTER);
+      textSize(28);
+      textStyle(NORMAL);
+      
+      text("CAN YOU REACH THE LINE?", width / 2, height / 2 - 110);
+
+      let boxWidth = 300;
+      let boxHeight = 200;
+      let boxX = (width - boxWidth) / 2;
+      let boxY = height / 2 - 60;
+
+      stroke(255);
+      strokeWeight(2);
+      noFill();
+      rect(boxX, boxY, boxWidth, boxHeight, 10);
+
+      noStroke();
+      textSize(18);
+      fill(255);
+      text("How to Play:", width / 2, boxY + 30);
+
+      textSize(13);
+      fill(255);
+      text("1. Press LEFT/RIGHT/UP arrow keys to move", width / 2, boxY + 75);
+
+      fill(225, 223, 0);
+      text("2. Collect yellow circles (coins) for points", width / 2, boxY + 105);
+
+      fill(255, 60, 60);
+      text("3. Avoid red balls (bombs)!", width / 2, boxY + 135);
+
+      fill(0, 255, 0);
+      text("4. Reach the green line at the top to win", width / 2, boxY + 165);
+
+      fill(255);
+      textSize(15);
+      if (frameCount % 50 < 25) {
+        text("CLICK TO START", width / 2, height / 2 + 165);
+      }
+    }
+
+    function drawPauseScreen() {
+      noStroke();
+      fill(0, 0, 0, 180);
+      rect(0, 0, width, height);
+      fill(255);
+      textSize(32);
+      textAlign(CENTER, CENTER);
+      textStyle(BOLD);
+      text("PAUSED", width / 2, height / 2 - 20);
+      textSize(15);
+      textStyle(NORMAL);
+      text("Press 'P' or click pause button to Resume", width / 2, height / 2 + 20);
+      drawPauseButton();
+    }
+
+    function drawGameOverScreen() {
+      noStroke();
+      fill(0, 0, 0, 150);
+      rect(0, 0, width, height);
+      fill(255, 70, 70);
+      textSize(34);
+      textAlign(CENTER, CENTER);
+      textStyle(BOLD);
+      text("GAME OVER", width / 2, height / 2 - 25);
+      fill(255);
+      textSize(16);
+      textStyle(NORMAL);
+      text(`Final Score: ${score}`, width / 2, height / 2 + 15);
+      text("Press 'R' to Restart", width / 2, height / 2 + 45);
+    }
+
+    function drawWinScreen() {
+      noStroke();
+      fill(0, 0, 0, 150);
+      rect(0, 0, width, height);
+      fill(0, 255, 120);
+      textSize(34);
+      textAlign(CENTER, CENTER);
+      textStyle(BOLD);
+      text("YOU REACHED THE LINE!", width / 2, height / 2 - 40);
+
+      textSize(16);
+      fill(255);
+      textStyle(NORMAL);
+      text(`Your Time: ${nf(currentTime / 1000, 0, 2)} s`, width / 2, height / 2 + 5);
+
+      if (bestTime === null || currentTime < bestTime) {
+        bestTime = currentTime;
+        try { localStorage.setItem('reach_line_bestTime', bestTime); } catch(e){}
+      }
+      text(`Best Time: ${nf(bestTime / 1000, 0, 2)} s`, width / 2, height / 2 + 30);
+      text("Press 'R' to Play Again", width / 2, height / 2 + 65);
+    }
+
+    function drawHUD() {
+      fill(255);
+      textSize(16);
+      textStyle(NORMAL);
+      noStroke();
+      textAlign(LEFT, TOP);
+      text(`Score: ${score}`, 25, 25);
+      text(`High Score: ${highScore}`, 25, 48);
+      text(`Time: ${nf(currentTime / 1000, 0, 2)} s`, 25, 71);
+    }
+
+    function drawPauseButton() {
+      fill(255);
+      noStroke();
+      rect(width - 50, 25, 10, 32);
+      rect(width - 32, 25, 10, 32);
+    }
+  </script>
+</body>
+</html>
